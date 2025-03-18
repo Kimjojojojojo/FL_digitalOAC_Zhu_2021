@@ -17,7 +17,7 @@ import Dataset
 @dataclass
 # ✅ Communication parameters
 class CommunicationParams:
-    K: int = 5  # 사용자 수
+    K: int = 10  # 사용자 수
     M: int = 10 # orthogonal sub-CHs
     q: int = 10  # size of gradient vector
     Nb: int = 1  # 기지국 안테나 수
@@ -29,11 +29,14 @@ class CommunicationParams:
 
 # ✅ Learning parameters
 params = CommunicationParams()
-subset_size = 60000 // params.K  # 각 사용자당 할당할 데이터 개수
+subset_size = int(60000 // params.K)  # 각 사용자당 할당할 데이터 개수
 batch = 100
-batch_set = [12, 10, 8, 4, 2]
+batch_set = []
+for k in range(params.K): # set mini batch size to each user
+    batch_set.append(batch)
+
 num_epochs = 100
-learning_rate = 0.01
+learning_rate = 1/np.sqrt(num_epochs)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # ✅ 1. 데이터셋 로딩 (MNIST)
@@ -58,9 +61,11 @@ for epoch in range(num_epochs):
     num_joining_data = 0
     total_loss = 0
     g_k_tilde = np.zeros((params.K, num_weights, 1))
+    shapes = None
+    total_grad_sum = None
     for k in range(params.K):
         # ✅ local_NN 호출
-        loss, total_grad = FL.local_NN(k, train_loaders, models, optimizers, criterions, device)
+        loss, total_grad, total_grad_sum = FL.local_NN(k, train_loaders, models, optimizers, criterions, device, total_grad_sum)
         total_loss += loss
         num_joining_data += batch_set[k]
 
@@ -69,11 +74,12 @@ for epoch in range(num_epochs):
     g_tilde = np.zeros((num_weights, 1))
     for iter in range(num_iter):
     ##### communication process #####
-        h_k = (np.random.normal(0, params.sigma, (params.K, params.M))  # downlink CH; channel of kth users in nth BW
-             + 1j * np.random.normal(0, params.sigma, (params.K, params.M))) / np.sqrt(2)
+        h_k = (np.random.normal(0, 1, (params.K, params.M))  # downlink CH; channel of kth users in nth BW
+             + 1j * np.random.normal(0, 1, (params.K, params.M))) / np.sqrt(2)
 
         # power allocation
         p_k = Communication.power_allocation(h_k, params)
+
         # pre-coding & transmitting
         g_tilde_t = np.zeros((params.M, 1), dtype=float)
         for k in range(params.K):
@@ -81,19 +87,20 @@ for epoch in range(num_epochs):
             g_k_tilde_Tr_k = (g_k_tilde_Tr_iter * p_k[k]).astype(np.float64)
             g_tilde_t += g_k_tilde_Tr_k
 
-        # noise
-        z = (np.random.normal(0, params.sigma, (num_weights, 1))  # downlink CH; channel of kth users in nth BW
-             + 1j * np.random.normal(0, params.sigma, (num_weights, 1))) / np.sqrt(2)
-
     # aggregation
         g_tilde[iter*params.M:(iter+1)*params.M] = g_tilde_t
 
-    # majority-vote decoding
-    v = Communication.majority_vote_decoder(g_tilde)
+    # noise
+    z = (np.random.normal(0, params.sigma, (num_weights, 1))  # downlink CH; channel of kth users in nth BW
+         + 1j * np.random.normal(0, params.sigma, (num_weights, 1))) / np.sqrt(2)
 
+    # majority-vote decoding
+    v = Communication.majority_vote_decoder(g_tilde + z)
+    #print(f"Shapes dictionary: {shapes}")  # shapes 값 출력
 
     ##### Central model update
-    v_structure = Functions.restore_original_shape(v, network_structure)
+    v_structure = Functions.restore_original_shape(v, shapes)
+    #print(v_structure)
     # aggregating local models into central model
     FL.central_NN(num_joining_data, optimizers, central_model, models, learning_rate, v_structure, total_loss, params)
 

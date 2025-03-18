@@ -36,33 +36,34 @@ class FNN(nn.Module):
         return gradient_structure
 
 
-def local_NN(k, train_loaders, models, optimizers, criterions, device):
+def local_NN(k, train_loaders, models, optimizers, criterions, device, total_grad_sum):
     models[k].train()
     batch_iterator = iter(train_loaders[k])
     images, labels = next(batch_iterator)
-
 
     images, labels = images.to(device), labels.to(device)
     optimizers[k].zero_grad()
     outputs = models[k](images)
     loss = criterions[k](outputs, labels)
     loss.backward()
+    print(loss.item())
     #print(loss.item())
-    optimizers[k].step()
-
+    #optimizers[k].step()
+    print(f"User {k}: First label in epoch : {labels[0].item()}")
     # ✅ Gradient 값 저장
     total_grad = {name: param.grad.clone() for name, param in models[k].named_parameters() if param.grad is not None}
 
-    # # ✅ main에서 받은 total_grad_sum이 None이면 초기화
-    # if total_grad_sum is None:
-    #     total_grad_sum = {name: torch.zeros_like(grad) for name, grad in total_grad.items()}
-    #
-    # # ✅ CH modeling : p_e를 넘기면 데이터 전송 성공
-    #
-    # for name in total_grad.keys():
-    #     total_grad_sum[name] +=  total_grad[name]  # 사용자별 평균 Gradient를 누적, weigthed by batch size
+    # ✅ main에서 받은 total_grad_sum이 None이면 초기화
+    if total_grad_sum is None:
+        total_grad_sum = {name: torch.zeros_like(grad) for name, grad in total_grad.items()}
 
-    return loss.item() , total_grad
+    # ✅ CH modeling : p_e를 넘기면 데이터 전송 성공
+    for name in total_grad.keys():
+        total_grad_sum[name] += total_grad[name]  # 사용자별 평균 Gradient를 누적, weigthed by batch size
+
+
+
+    return loss.item(), total_grad, total_grad_sum
 
 def central_NN(num_joining_data, optimizers, central_model, models, learning_rate, total_grad_sum, total_loss, params):
     print(f'joining users {num_joining_data}, average loss: {total_loss / params.K}')
@@ -70,7 +71,7 @@ def central_NN(num_joining_data, optimizers, central_model, models, learning_rat
     central_optimizer = optim.Adam(central_model.parameters(), lr=learning_rate)  # 중앙 모델용 Optimizer 추가
     with torch.no_grad():
         for name, param in central_model.named_parameters():
-            param.grad = total_grad_sum[name] / num_joining_data  # 모든 사용자 평균 Gradient 적용
+            param.grad = (total_grad_sum[name].to(param.device) / params.K).float() # 모든 사용자 평균 Gradient 적용
 
     # ✅ Optimizer를 사용하여 중앙 모델 업데이트
     central_optimizer.step()

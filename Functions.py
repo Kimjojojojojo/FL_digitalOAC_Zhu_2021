@@ -21,11 +21,12 @@ def extract_and_sign(total_grad_sum):
 
 # sign 벡터를 원래 구조로 복원하는 함수
 def restore_original_shape(signed_vector, shapes):
+    torch_vector = torch.from_numpy(signed_vector)
     restored_dict = {}
     idx = 0
     for name, shape in shapes.items():
         num_elements = torch.prod(torch.tensor(shape))  # 요소 개수
-        restored_dict[name] = signed_vector[idx:idx + num_elements].view(shape)  # 원래 shape로 변환
+        restored_dict[name] = torch_vector[idx:idx + num_elements].view(shape)  # 원래 shape로 변환
         idx += num_elements
 
     return restored_dict
