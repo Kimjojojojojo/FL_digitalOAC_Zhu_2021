@@ -61,7 +61,7 @@ num_weights = central_model.count_parameters()
 central_model_accuracies_v_structure = []
 central_model_accuracies_total_grad_sum = []
 
-for mode in ["v_structure", "total_grad_sum"]:
+for mode in ["v_structure"]:
     print(f"\n=== Running Experiment with X = {mode} ===")
 
     central_model.load_state_dict(FL.FNN().state_dict())  # 중앙 모델 초기화
@@ -137,8 +137,8 @@ for mode in ["v_structure", "total_grad_sum"]:
 # ✅ Accuracy 비교 플롯
 plt.plot(range(1, num_epochs + 1), central_model_accuracies_v_structure, marker='o', linestyle='-',
          label="Digital OTA")
-plt.plot(range(1, num_epochs + 1), central_model_accuracies_total_grad_sum, marker='s', linestyle='--',
-         label="OTA")
+# plt.plot(range(1, num_epochs + 1), central_model_accuracies_total_grad_sum, marker='s', linestyle='--',
+#          label="OTA")
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy (%)")
 plt.ylim([0, 100])

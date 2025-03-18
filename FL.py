@@ -49,7 +49,7 @@ def local_NN(k, train_loaders, models, optimizers, criterions, device, total_gra
     print(loss.item())
     #print(loss.item())
     #optimizers[k].step()
-    print(f"User {k}: First label in epoch : {labels[0].item()}")
+    #print(f"User {k}: First label in epoch : {labels[0].item()}")
     # ✅ Gradient 값 저장
     total_grad = {name: param.grad.clone() for name, param in models[k].named_parameters() if param.grad is not None}
 
