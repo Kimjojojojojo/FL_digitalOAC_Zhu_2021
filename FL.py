@@ -46,13 +46,13 @@ def local_NN(k, train_loaders, models, optimizers, criterions, device, total_gra
     outputs = models[k](images)
     loss = criterions[k](outputs, labels)
     loss.backward()
-    print(loss.item())
+    #print(loss.item())
     #print(loss.item())
     #optimizers[k].step()
     #print(f"User {k}: First label in epoch : {labels[0].item()}")
     # ✅ Gradient 값 저장
     total_grad = {name: param.grad.clone() for name, param in models[k].named_parameters() if param.grad is not None}
-
+    #print(total_grad)
     # ✅ main에서 받은 total_grad_sum이 None이면 초기화
     if total_grad_sum is None:
         total_grad_sum = {name: torch.zeros_like(grad) for name, grad in total_grad.items()}
@@ -60,7 +60,6 @@ def local_NN(k, train_loaders, models, optimizers, criterions, device, total_gra
     # ✅ CH modeling : p_e를 넘기면 데이터 전송 성공
     for name in total_grad.keys():
         total_grad_sum[name] += total_grad[name]  # 사용자별 평균 Gradient를 누적, weigthed by batch size
-
 
 
     return loss.item(), total_grad, total_grad_sum
