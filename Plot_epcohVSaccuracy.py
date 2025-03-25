@@ -23,7 +23,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 @dataclass
 class CommunicationParams:
     K: int = 10
-    M: int = 10
+    M: int = 100
     q: int = 10
     Nb: int = 1
     Nu: int = 1
@@ -32,7 +32,7 @@ class CommunicationParams:
     N0: float = 10 ** (-174 / 10) * 10 ** (-3)
     B_U: float = 1 * 10 ** 6
     num_bits: int = 16
-    num_sym: int = 128
+    num_sym: int = 256
     m_dB: np.ndarray = field(default_factory=lambda: np.array([5.782, 7.083, -0.983, 0.023, -4.401, -4.312]))
     m: np.ndarray = field(init=False)
     sigma: float = 0
@@ -51,12 +51,14 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 central_model_accuracies_signedSGD = []
 central_model_accuracies_analogOTA = []
+central_model_accuracies_vanillaOTA = []
 central_model_accuracies_digitalOFDMA = []
 
 save_dir = "saved_models"
 os.makedirs(save_dir, exist_ok=True)
-mod_tmp = ["signedSGD"]
+mod_tmp = ["signedSGD", "analogOTA", "vanillaOTA"]
 
+Ei_g_th, _ = Functions.exponential_integration(params.g_th)
 for mode in mod_tmp:
     print(f"\n=== Running Experiment with {mode} ===")
     train_loaders, test_loader = Dataset.MNIST_dataloader(100, batch_set, subset_size, params)
@@ -67,8 +69,8 @@ for mode in mod_tmp:
     num_weights = central_model.count_parameters()
 
 
-    central_model_filename = Functions.generate_model_filename(params, mode)
-    central_model_save_path = os.path.join(save_dir, central_model_filename)
+    #central_model_filename = Functions.generate_model_filename(params, mode)
+    #central_model_save_path = os.path.join(save_dir, central_model_filename)
 
     # if os.path.exists(central_model_save_path):
     #     central_model.load_state_dict(torch.load(central_model_save_path))
@@ -80,7 +82,7 @@ for mode in mod_tmp:
 
     accuracies = []
     best_accuracy = 0
-    best_model_path = os.path.join(save_dir, f"best_{central_model_filename}")
+    #best_model_path = os.path.join(save_dir, f"best_{central_model_filename}")
 
     for epoch in range(num_epochs):
         print(f"\n=== Epoch {epoch + 1}/{num_epochs} ===")
@@ -112,53 +114,76 @@ for mode in mod_tmp:
             g_k_vector.append(g_k_vector_k)
             g_k_tilde.append(Functions.sign(g_k_vector_k, shapes))
         end = time.time()
-        print(f"⏱️ loac NN 학습 시간: {end - start:.4f}초")
+        #print(f"⏱️ loac NN 학습 시간: {end - start:.4f}초")
         grad_sum = {name: torch.zeros_like(grad) for name, grad in total_grad_sum.items()}
         num_iter = num_weights // params.M
         g_tilde = torch.zeros((num_weights, 1), dtype=torch.float, device=device)
 
         if mode == "signedSGD":
-            start = time.time()
-            for iter in range(num_iter):
-                #print(f"\n=== Iteration {iter + 1}/{num_iter} ===")
 
+            for iter in range(num_iter):
+                import time
+
+                start_iter = time.perf_counter()
                 h_k = Functions.complex_gaussian((params.K, params.M), std=1.0, device=device)
-                p_k = Communication.power_allocation(h_k, params)
+                p_k = Communication.power_allocation(h_k, Ei_g_th, params)
+                t1 = time.perf_counter()
+
                 g_tilde_t = torch.zeros((params.M, 1), dtype=torch.float, device=device)
+                t2 = time.perf_counter()
 
                 for k in range(params.K):
                     g_k_tilde_Tr_iter = g_k_tilde[k][iter * params.M:(iter + 1) * params.M]
-                    g_k_tilde_Tr_k = g_k_tilde_Tr_iter * p_k[k]
+                    g_k_tilde_Tr_k = g_k_tilde_Tr_iter * p_k[k].real
                     g_tilde_t += g_k_tilde_Tr_k
+                t3 = time.perf_counter()
 
                 g_tilde[iter * params.M:(iter + 1) * params.M] = g_tilde_t
-            end = time.time()
-            print(f"⏱️ 통신 시간: {end - start:.4f}초")
+                t4 = time.perf_counter()
+
+                # print(f"  ⏱️ h_k + p_k 생성: {t1 - start_iter:.6f}초")
+                # print(f"  ⏱️ g_tilde_t 초기화: {t2 - t1:.6f}초")
+                # print(f"  ⏱️ 내부 k 루프: {t3 - t2:.6f}초")
+                # print(f"  ⏱️ g_tilde 저장: {t4 - t3:.6f}초")
+                #
+                # print(f"⏱️ 통신 시간: {end - start:.4f}초")
             z = params.sigma * torch.zeros((num_weights, 1), dtype=torch.float, device=device)
             v = Communication.majority_vote_decoder(g_tilde + z)
             X = Functions.inv_vectorization(v, shapes)
 
-
-
         elif mode == "analogOTA":
             for iter in range(num_iter):
                 h_k = Functions.complex_gaussian((params.K, params.M), std=1.0, device=device)
-                p_k = Communication.power_allocation(h_k, params)
+                p_k = Communication.power_allocation(h_k, Ei_g_th, params)
                 g_t = torch.zeros((params.M, 1), dtype=torch.float, device=device)
 
                 for k in range(params.K):
                     g_k_Tr_iter = g_k_vector[k][iter * params.M:(iter + 1) * params.M]
-                    g_k_Tr_k = g_k_Tr_iter * p_k[k]
+                    g_k_Tr_k = g_k_Tr_iter * p_k[k].real
+                    g_t += g_k_Tr_k
+
+                g_tilde[iter * params.M:(iter + 1) * params.M] = g_t
+            rho_0 = params.P0 / (params.M * Ei_g_th)
+            z = params.sigma * torch.zeros((num_weights, 1), dtype=torch.float, device=device)
+            v = (g_tilde + z) / rho_0
+            X = Functions.inv_vectorization(v, shapes)
+
+        elif mode == "vanillaOTA":
+            for iter in range(num_iter):
+                g_t = torch.zeros((params.M, 1), dtype=torch.float, device=device)
+
+                for k in range(params.K):
+                    g_k_Tr_iter = g_k_vector[k][iter * params.M:(iter + 1) * params.M]
+                    g_k_Tr_k = g_k_Tr_iter
                     g_t += g_k_Tr_k
 
                 g_tilde[iter * params.M:(iter + 1) * params.M] = g_t
 
-            z = params.sigma * torch.zeros((num_weights, 1), dtype=torch.float, device=device)
-            v = g_tilde + z
+            v = g_tilde
             X = Functions.inv_vectorization(v, shapes)
 
         elif mode == "digitalOFDMA":
-            for iter in range(num_weights):
+            for iter in range(num_weights/(params.M//params.K)):
                 tx_round = int(params.num_bits // np.log2(params.num_sym))
                 success_vec = torch.zeros(params.K, dtype=torch.float, device=device)
 
@@ -180,6 +205,7 @@ for mode in mod_tmp:
 
             X = grad_sum
 
+        start = time.time()
         FL.central_NN(num_joining_data, optimizers, central_model, models, learning_rate, X, total_loss, params)
 
         central_model.eval()
@@ -196,7 +222,8 @@ for mode in mod_tmp:
         accuracy = 100 * correct / total
         print(f'accuracy={accuracy:.2f}%')
         accuracies.append(accuracy)
-
+        end = time.time()
+        #print(f"⏱️평가 시간: {end - start:.4f}초")
         # if accuracy > best_accuracy:
         #     best_accuracy = accuracy
         #     torch.save(central_model.state_dict(), best_model_path)
@@ -205,19 +232,30 @@ for mode in mod_tmp:
         central_model_accuracies_signedSGD = accuracies
     elif mode == "analogOTA":
         central_model_accuracies_analogOTA = accuracies
+    elif mode == "vanillaOTA":
+        central_model_accuracies_vanillaOTA = accuracies
     elif mode == "digitalOFDMA":
         central_model_accuracies_digitalOFDMA = accuracies
 
-    torch.save(central_model.state_dict(), central_model_save_path)
+    #torch.save(central_model.state_dict(), central_model_save_path)
 
 if central_model_accuracies_signedSGD:
-    plt.plot(range(1, num_epochs + 1), central_model_accuracies_signedSGD, marker='o', linestyle='-', label="Signed SGD")
+    plt.plot(range(1, num_epochs + 1), central_model_accuracies_signedSGD, marker='o', linestyle='-',
+             label="Signed SGD", ms=5)
 
 if central_model_accuracies_analogOTA:
-    plt.plot(range(1, num_epochs + 1), central_model_accuracies_analogOTA, marker='s', linestyle='--', label="Analog OTA")
+    plt.plot(range(1, num_epochs + 1), central_model_accuracies_analogOTA, marker='s', linestyle='-',
+             label="Analog OTA", ms=5)
+
+if central_model_accuracies_vanillaOTA:
+    plt.plot(range(1, num_epochs + 1), central_model_accuracies_analogOTA, marker='+', linestyle='-',
+             label="Vanilla OTA", ms=5)
 
 if central_model_accuracies_digitalOFDMA:
-    plt.plot(range(1, num_epochs + 1), central_model_accuracies_digitalOFDMA, marker='^', linestyle='-.', label="Digital OFDMA")
+    plt.plot(range(1, num_epochs + 1), central_model_accuracies_digitalOFDMA, marker='^', linestyle='-',
+             label="Digital OFDMA", ms=5)
+
+
 
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy (%)")
@@ -225,4 +263,13 @@ plt.ylim([0, 100])
 plt.title("Accuracy Comparison")
 plt.legend()
 plt.grid()
+
+
+file_name = Functions.generate_model_filename(params, batch, num_epochs, learning_rate)
+save_dir = "simulation_graphs"
+os.makedirs(save_dir, exist_ok=True)
+save_path = os.path.join(save_dir, file_name)
+plt.savefig(save_path, dpi=300, bbox_inches='tight')
+print(f"✅ 그래프 저장 완료: {save_path}")
+
 plt.show()

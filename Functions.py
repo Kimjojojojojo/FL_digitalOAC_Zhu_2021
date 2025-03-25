@@ -46,15 +46,15 @@ def inv_vectorization(signed_vector, shapes):
 def complex_gaussian(shape, device, std=1.0):
     real = torch.randn(shape, dtype=torch.float, device=device) * std
     imag = torch.randn(shape, dtype=torch.float, device=device) * std
-    return (real + 1j * imag) / torch.sqrt(torch.tensor(2.0, device=device))
+    return (real + 1j * imag) * 0.70710678
 
 
-def generate_model_filename(params, mode):
+def generate_model_filename(params, batch, num_epochs, learning_rate):
     """ 하이퍼파라미터를 기반으로 해시값 생성 후 파일명 반환 """
-    param_string = f"K{params.K}_M{params.M}_q{params.q}_Nb{params.Nb}_Nu{params.Nu}_gth{params.g_th}_P0{params.P0}_N0{params.N0}_BU{params.B_U}_bits{params.num_bits}"
+    param_string = f"larning_rate{learning_rate}_epochs{num_epochs}_batch{batch}_K{params.K}_M{params.M}_q{params.q}_Nb{params.Nb}_Nu{params.Nu}_gth{params.g_th}_P0{params.P0}_N0{params.N0}_BU{params.B_U}_bits{params.num_bits}"
     hash_value = hashlib.md5(param_string.encode()).hexdigest()[:8]  # 해시 생성 (앞 8자리만 사용)
     #print(hash_value)
-    return f"model_{hash_value}.pth"  # 모델 파일명 반환
+    return f"plot_{hash_value}.png"  # 모델 파일명 반환
 # 예제 total_grad_sum (가상의 gradient 값)
 # total_grad_sum = {
 #     "layer1.weight": torch.tensor([[0.5, -0.3], [0.2, -0.7]]),
